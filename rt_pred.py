@@ -208,9 +208,11 @@ def execute(data_file, solver, smac_name, train_index, test_index):
                                             bootstrap=inc["rfreg:bootstrap"],
                                             random_state=12345)
     model.fit(Xtrain, Ytrain)
-    preds = model.predict(Xtest)
+    #preds = model.predict(Xtest)
+    dist_preds = np.stack([tree.predict(Xtest) for tree in model.estimators_], axis=1)
     mse = mean_squared_error(Ytest, preds)
-    np.save(f'rts_results/{smac_name}', np.array([model, preds, mse], dtype=object))
+    #np.save(f'rts_results/{smac_name}', np.array([model, preds, mse], dtype=object))
+    np.save(f'rts_results/{smac_name}', np.array([model, dist_preds, mse], dtype=object))
 
 if __name__ == '__main__':
     executor = submitit.AutoExecutor('logs', 'slurm')
