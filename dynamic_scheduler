@@ -1,0 +1,121 @@
+import heapq
+import time
+from collections import defaultdict
+import numpy as np
+
+# === Configurable Parameters ===
+T_GLOBAL = 1000  # total budget in seconds
+t0 = 2           # initial time slice in seconds
+alpha = 3        # multiplier for Tmax = alpha * predicted runtime
+beta = 1         # slice multiplier based on prediction
+gamma = 1        # slice multiplier based on progress
+w1, w2, w3 = 1, 1, 1  # weights for progress function
+
+# === Mock Solver Execution ===
+def run_solver(solver, instance, time_slice):
+    # Stub: Replace with actual solver call using subprocess or API
+    time.sleep(0.01)  # Simulate execution delay
+    return False  # Stub: Return True if solved, False otherwise
+
+# === Progress Metrics ===
+def compute_progress(solver, instance):
+    # Stub: Replace with actual conflict rate, LBD, decision activity
+    conf, lbd, dec = 10, 5, 15
+    # Normalize and combine
+    return w1 * (conf / 100) - w2 * (lbd / 100) + w3 * (dec / 100)
+
+# === Priority Queue Helper ===
+class PriorityQueue:
+    def __init__(self):
+        self.heap = []
+        self.entry_finder = {}
+        self.REMOVED = '<removed>'
+        self.counter = 0
+
+    def insert(self, item, priority):
+        if item in self.entry_finder:
+            self.remove(item)
+        count = self.counter
+        entry = [-priority, count, item]
+        self.entry_finder[item] = entry
+        heapq.heappush(self.heap, entry)
+        self.counter += 1
+
+    def remove(self, item):
+        entry = self.entry_finder.pop(item)
+        entry[-1] = self.REMOVED
+
+    def pop(self):
+        while self.heap:
+            priority, count, item = heapq.heappop(self.heap)
+            if item is not self.REMOVED:
+                del self.entry_finder[item]
+                return item
+        raise KeyError('pop from an empty priority queue')
+
+    def __bool__(self):
+        return any(item[-1] != self.REMOVED for item in self.heap)
+
+# === Scheduler ===
+def dynamic_scheduler(solvers, instances, hat_T_dist):
+    T_used = 0
+    Q = PriorityQueue()
+    solved = set()
+    cumulative_time = defaultdict(float)
+    first_round = set()
+    rho = defaultdict(float)
+
+    instance_solved = set()
+
+    # Initialize priority queue
+    for s in solvers:
+        for i in instances:
+            mean_runtime = np.mean(hat_T_dist[(s, i)])
+            Q.insert((s, i), 1 / mean_runtime)
+            first_round.add((s, i))
+
+    while T_used < T_GLOBAL and Q:
+        s, i = Q.pop()
+        if i in instance_solved:
+            continue
+
+        mean_runtime = np.mean(hat_T_dist[(s, i)])
+        if cumulative_time[(s, i)] >= alpha * mean_runtime:
+            continue
+
+        if (s, i) in first_round:
+            t_slice = t0
+            first_round.remove((s, i))
+        elif rho[(s, i)] > 0.5:  # Arbitrary strong progress threshold
+            t_slice = gamma * mean_runtime
+        else:
+            t_slice = beta * mean_runtime
+
+        start_time = time.time()
+        success = run_solver(s, i, t_slice)
+        actual_runtime = time.time() - start_time
+
+        T_used += actual_runtime
+        cumulative_time[(s, i)] += actual_runtime
+
+        if success:
+            instance_solved.add(i)
+        else:
+            rho[(s, i)] = compute_progress(s, i)
+            priority = rho[(s, i)] / mean_runtime
+            Q.insert((s, i), priority)
+
+    return instance_solved
+
+# === Example Usage ===
+solvers = ['minisat', 'cadical']
+instances = ['inst1', 'inst2']
+hat_T_dist = {
+    ('minisat', 'inst1'): np.random.normal(10, 2, 100),
+    ('minisat', 'inst2'): np.random.normal(50, 5, 100),
+    ('cadical', 'inst1'): np.random.normal(30, 3, 100),
+    ('cadical', 'inst2'): np.random.normal(20, 4, 100),
+}
+
+solved_instances = dynamic_scheduler(solvers, instances, hat_T_dist)
+print("Solved:", solved_instances)
